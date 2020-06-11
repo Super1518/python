@@ -45,7 +45,7 @@ price_group = find_price_group(html)
 print('-----------------------------------------------------')
 print('%s %s %s' % ('序号'.ljust(8), '数量'.ljust(8), '单价'.ljust(8)))
 for i,tag in enumerate(price_group, 1):
-    # print(tag)
+    print(tag)
     numbers = find_numbers(tag)
     prices = find_price(tag)
     print('-----------------------------------------------------')
