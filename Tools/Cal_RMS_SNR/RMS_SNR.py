@@ -9,69 +9,97 @@
 import os
 import math
 import pandas as pd
+import xlwt
+import re
 
-
-TX_NUM = 16
-RX_NUM = 36
-
-NODE_NUM = 9
+SOFT_VERSION = 'V1.0'
+TX_NUM = 0
+RX_NUM = 0
+NODE_NUM = 0
 NODE_LIST = [[2, 3], [9, 3], [15, 3], [2, 18], [9, 18], [15, 18], [2, 35], [9, 35], [15, 35]]
+# NODE_LIST = [[2, 3], [8, 3], [15, 3], [2, 18], [8, 18], [15, 18], [2, 35], [9, 35], [15, 35]]
 
 current_path = os.getcwd()
-
 signal_path = current_path
 noise_path = current_path + '/' + 'Noise.txt'
 
 
-def get_noise(path):
+def get_chanel_msg():
+    tx_num = 0
+    rx_num = 0
+    with open(noise_path, 'r') as f:
+        content = f.read()
+        tx_num = re.findall(r'TxNum:(\d{2})', content)[0]
+        rx_num = re.findall(r'RxNum:(\d{2})', content)[0]
+        # print(tx_num, rx_num)
+    return int(tx_num), int(rx_num)
+
+
+def get_noise_list(path):
     """
     功能：获取需要计算SNR的所有节点Noise
     :param path: noise.txt
     :return:
     """
-    mc_need_cal_node_noise = []
-    sc_need_cal_node_noise = []
-    mc_noise_data_start_line = 8
-    # mc_noise_data_end_line = mc_noise_data_start_line + TX_NUM
+    mc_noise_list = []
+    sc_noise_list = []
     with open(path, 'r') as f:
-        lines = f.readlines()
-        # print(lines)
-        tx_chanel = 0
-        rx_chanel = 0
-        for i in range(0, NODE_NUM):
-            tx_chanel = NODE_LIST[i][0]
-            rx_chanel = NODE_LIST[i][1]
-            # print('tx = %d rx = %d' % (tx_chanel, rx_chanel))
-            line_noise = lines[mc_noise_data_start_line+tx_chanel-1]
-            line_noise = line_noise.strip()
-            line_noise = line_noise.split()
-            # print(line_noise)
-            node_noise = line_noise[rx_chanel-1]
-            # print(node_noise)
-            mc_need_cal_node_noise.append(float(node_noise))
+        content = f.read()
+        mc_noise = re.split(r'NoiseAvrSCap', content)[0]
+        mc_noise = re.split(r'NoiseMax:\d+\.\d*\n', mc_noise)[1]
+        mc_noise = mc_noise.strip()
+        mc_noise = mc_noise.split('\n')
+        for line in mc_noise:
+            line = line.strip()
+            line = line.split()
+            # print(line)
+            mc_noise_list.append(line)
+        # print(mc_noise_list)
 
-        print('Need Cal Node Mc Noise is :', end=' ')
-        for i in range(len(mc_need_cal_node_noise)):
-            print(mc_need_cal_node_noise[i], end=' ')
-        print(end='\n')
+        sc_noise = re.split(r'NoiseMaxSCapNoProof:\d+\.\d+\n', content)[1]
+        sc_noise = sc_noise.strip()
+        sc_noise = sc_noise.split('\n')
+        # print(sc_noise)
+        for line in sc_noise:
+            line = line.split()
+            sc_noise_list.append(line)
+        # print(sc_noise_list)
+    return mc_noise_list, sc_noise_list
 
-        # 统计自容SC的noise数据
-        sc_noise_data_start_line = 41
-        for i in range(0, NODE_NUM):
-            tx_chanel = NODE_LIST[i][0]
-            rx_chanel = NODE_LIST[i][1]
-            # print('tx = %d rx = %d' % (tx_chanel, rx_chanel))
-            line_noise = lines[sc_noise_data_start_line - 1]
-            line_noise = line_noise.strip()
-            line_noise = line_noise.split()
-            node_noise = line_noise[rx_chanel - 1]
-            sc_need_cal_node_noise.append(float(node_noise))
 
-        print('Need Cal Node Sc Noise is :', end=' ')
-        for i in range(len(sc_need_cal_node_noise)):
-            print(sc_need_cal_node_noise[i], end=' ')
-        print(end='\n')
-    return mc_need_cal_node_noise, sc_need_cal_node_noise
+def get_cal_noise(path):
+    mc_noise_list, sc_noise_list = get_noise_list(path)
+    mc_need_noise = []
+    sc_need_noise = []
+    for node in NODE_LIST:
+        tx_ch = node[0]
+        rx_ch = node[1]
+        mc_need_noise.append(float(mc_noise_list[tx_ch-1][rx_ch-1]))
+        sc_need_noise.append(float(sc_noise_list[0][rx_ch-1]))
+
+    # print('mc noise:', mc_need_noise)
+    # print('sc noise:', sc_need_noise)
+    return mc_need_noise, sc_need_noise
+
+
+def get_one_file_signal(file_path, tx_ch, rx_ch):
+    mc_signal_list = []
+    sc_signal_list = []
+    # print(file_path)
+    with open(file_path, 'r') as f:
+        content = f.read()
+        content = re.split(r'RMS Noise Of Each Node', content)[0]
+        content = re.split(r'Signal Of Each Node:', content)[1]
+        content = content.strip()
+        signal = content.split('\n')
+        for i in range(TX_NUM):
+            mc_signal_list.append(signal[i].strip().split())
+
+        sc_signal_list.append(signal[TX_NUM+2].strip().split())
+        # print(mc_signal_list[tx_ch-1][rx_ch-1])
+        # print(sc_signal_list[0][rx_ch-1])
+
+    return mc_signal_list[tx_ch-1][rx_ch-1], sc_signal_list[0][rx_ch-1]
 
 
 def get_signal(path):
@@ -98,31 +126,19 @@ def get_signal(path):
     for file_index, file in node_file_dict.items():
         # print(file_index, file)
         file_path = path + '/' + file
-        mc_signal_start_line = 6
-        sc_signal_start_line = mc_signal_start_line + TX_NUM + 3
         node_index = int(file_index)
         tx_chanel = NODE_LIST[node_index-1][0]
         rx_chanel = NODE_LIST[node_index-1][1]
+        node_mc_signal, node_sc_signal = get_one_file_signal(file_path, tx_chanel, rx_chanel)
+        # print(node_mc_signal, node_sc_signal)
 
-        with open(file_path, 'r') as f:
-            lines = f.readlines()
+        # 统计互容MC的signal
+        if node_index not in mc_node_signal_dict.keys():
+            mc_node_signal_dict[node_index] = float(node_mc_signal)
 
-            # 统计互容MC的signal
-            mc_line_signal = lines[mc_signal_start_line + tx_chanel - 1]
-            mc_line_signal = mc_line_signal.strip().split()
-            node_signal = mc_line_signal[rx_chanel-1]
-            # print(node_signal)
-            if node_index not in mc_node_signal_dict.keys():
-                mc_node_signal_dict[node_index] = float(node_signal)
-
-            # 统计自容SC的signal
-            sc_line_signal = lines[sc_signal_start_line - 1]
-            sc_line_signal = sc_line_signal.strip().split()
-            node_signal = sc_line_signal[rx_chanel-1]
-            # print(node_signal)
-            if node_index not in sc_node_signal_dict.keys():
-                sc_node_signal_dict[node_index] = float(node_signal)
-
+        # 统计自容SC的signal
+        if node_index not in sc_node_signal_dict.keys():
+            sc_node_signal_dict[node_index] = float(node_sc_signal)
 
     # print(mc_node_signal_dict)
     # print(sc_node_signal_dict)
@@ -160,16 +176,13 @@ def cal_snr():
     功能：计算所有需要计算的节点SNR
     :return:
     """
-    mc_cal_node_noise, sc_cal_node_noise = get_noise(noise_path)
-    mc_cal_node_signal, sc_cal_node_signal = get_signal(signal_path)
-    # print(len(cal_node_signal))
-    # print(len(cal_node_noise))
+
 
     mc_snr_list = []
     sc_snr_list = []
-    if len(mc_cal_node_noise) != NODE_NUM or len(mc_cal_node_noise) != NODE_NUM:
-        print('signal len != noise len, please check!')
-        return mc_snr_list
+
+    mc_cal_node_signal, sc_cal_node_signal = get_signal(signal_path)
+    mc_cal_node_noise, sc_cal_node_noise = get_cal_noise(noise_path)
 
     # 计算互容SNR
     for i in range(NODE_NUM):
@@ -186,7 +199,6 @@ def cal_snr():
     # for i in range(3):
     #     sc_snr_list[i] = round(sum(sc_snr_list[i:i+3])/3)
 
-
     # 需要计算节点的signal、noise、snr保存到文本中
     with open('./SNR计算结果.txt', 'w') as f:
         f.write('Node Mc Signal: '+' '.join(map(str, mc_cal_node_signal))+'\n')
@@ -196,9 +208,42 @@ def cal_snr():
         f.write('Node Sc Signal: '+' '.join(map(str, sc_cal_node_signal))+'\n')
         f.write('Node Sc Noise: ' + ' '.join(map(str, sc_cal_node_noise)) + '\n')
         f.write('Node Sc SNR: ' + ' '.join(map(str, sc_snr_list)) + '\n')
+
+    # 保存到Excel
+    workbook = xlwt.Workbook()
+    worksheet = workbook.add_sheet('SNR')
+
+    worksheet.write(1, 1, 'Mc Signal')
+    for i in range(len(mc_cal_node_signal)):
+        worksheet.write(1, 2+i, mc_cal_node_signal[i])
+
+    worksheet.write(2, 1, 'Mc Noise')
+    for i in range(len(mc_cal_node_noise)):
+        worksheet.write(2, 2+i, mc_cal_node_noise[i])
+
+    worksheet.write(3, 1, 'Mc SNR')
+    for i in range(len(mc_snr_list)):
+        worksheet.write(3, 2+i, mc_snr_list[i])
+
+    worksheet.write(4, 1, 'Sc Signal')
+    for i in range(len(sc_cal_node_signal)):
+        worksheet.write(4, 2+i, sc_cal_node_signal[i])
+
+    worksheet.write(5, 1, 'Sc Noise')
+    for i in range(len(sc_cal_node_noise)):
+        worksheet.write(5, 2+i, sc_cal_node_noise[i])
+
+    worksheet.write(6, 1, 'Sc SNR')
+    for i in range(len(sc_snr_list)):
+        worksheet.write(6, 2+i, sc_snr_list[i])
+
+    workbook.save('SNR.xls')
+
     return mc_snr_list, sc_snr_list
 
 
+TX_NUM, RX_NUM = get_chanel_msg()
+NODE_NUM = len(NODE_LIST)
 mc_snr_result, sc_snr_result = cal_snr()
 print('Mc SNR is:', mc_snr_result)
 print('Sc SNR is:', sc_snr_result)
